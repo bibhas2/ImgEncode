@@ -242,84 +242,50 @@ int main() {
         return 1;
     }
 
-    //copy_URL("HELLOWO", "image/svg+xml"); return 1;
-    UINT format = 0; // Start the enumeration with 0 to get the first format
-    int item = 0;
+    //Register "PNG" format
+	UINT pngFormat = RegisterClipboardFormatA("PNG");
 
-    while (true) {
-        format = EnumClipboardFormats(format); // Get the next format
+	//Get the text data from the clipboard
+    HANDLE hData = NULL;
 
-        if (format == 0) {
-            // Check for errors or end of enumeration
-            DWORD error = GetLastError();
+	if ((hData = GetClipboardData(CF_TEXT)) != NULL) {
+		char* pData = static_cast<char*>(GlobalLock(hData));
 
-            if (error == NO_ERROR) { // End of enumeration
-                break;
-            }
-            else { // An actual error occurred
-                std::cerr << "Failed to enumerate clipboard formats. Error: " << error << std::endl;
-                CloseClipboard();
-                return 1;
-            }
-        }
+		if (pData) {
+			std::string_view data(pData);
 
-        if (format == CF_TEXT) {
-			//Get the text data from the clipboard
-			HANDLE hData = GetClipboardData(format);
-			if (hData) {
-				char* pData = static_cast<char*>(GlobalLock(hData));
-
-				if (pData) {
-					//std::cout << "  - [TEXT] " << pData << std::endl;
-					std::string_view data(pData);
-
-                    copy_URL(data, "image/svg+xml");
-
-
-					GlobalUnlock(hData);
-				}
-				else {
-					std::cerr << "Failed to lock clipboard data. Error: " << GetLastError() << std::endl;
-				}
+			//Check if the data starts with the SVG header
+            if (data.starts_with("<?xml") || data.starts_with("<svg")) {
+                copy_URL(data, "image/svg+xml");
 			}
 			else {
-				std::cerr << "Failed to get clipboard data for CF_TEXT. Error: " << GetLastError() << std::endl;
-			}
-        }
-
-        // Get the name of the format if it's a registered format
-        char formatName[256];
-        if (GetClipboardFormatNameA(format, formatName, sizeof(formatName)) > 0) {
-            //std::cout << "  - [NAMED] " << formatName << " (Format ID: " << format << ")" << std::endl;
-
-            std::string_view png = "PNG";
-
-			if (png == formatName) {
-                HANDLE hData = GetClipboardData(format);
-
-                if (hData) {
-                    char* pData = static_cast<char*>(GlobalLock(hData));
-					
-
-                    if (pData) {
-                        //Get size of data
-                        size_t size = GlobalSize(hData);
-
-                        process_png(pData, size);
-
-                        GlobalUnlock(hData);
-                    }
-                    else {
-                        std::cerr << "Failed to lock clipboard data. Error: " << GetLastError() << std::endl;
-                    }
-                }
-                else {
-                    std::cerr << "Failed to get clipboard data for CF_TEXT. Error: " << GetLastError() << std::endl;
-                }
+				std::cout << "Clipboard does not contain SVG data." << std::endl;
 			}
 
+			GlobalUnlock(hData);
+		}
+		else {
+			std::cerr << "Failed to lock clipboard data. Error: " << GetLastError() << std::endl;
+		}
+	}
+	else if ((hData = GetClipboardData(pngFormat)) != NULL) {
+        char* pData = static_cast<char*>(GlobalLock(hData));
+
+        if (pData) {
+            //Get size of data
+            size_t size = GlobalSize(hData);
+
+            process_png(pData, size);
+
+            GlobalUnlock(hData);
         }
-    }
+        else {
+            std::cerr << "Failed to lock clipboard data. Error: " << GetLastError() << std::endl;
+        }
+	}
+	else {
+		std::cout << "Did not find SVG or PNG in clipboard." << std::endl;
+	}
 
     // Close the clipboard
     CloseClipboard();
