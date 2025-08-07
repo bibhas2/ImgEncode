@@ -235,11 +235,142 @@ void process_png(char *pData, size_t size) {
     */
 }
 
-int main() {
+bool get_arg(int argc, char** argv, std::string_view arg_name, char** arg_value) {
+	for (int i = 0; i < argc; ++i) {
+        if (argv[i] == arg_name) {
+            if (i + 1 < argc) {
+                *arg_value = argv[i + 1];
+
+                return true;
+            }
+            else {
+                std::cerr << "Argument " << arg_name << " requires a value." << std::endl;
+
+                return false;
+            }
+        }
+	}
+
+	return false;
+}
+
+struct FileMapper {
+    HANDLE file_handle = INVALID_HANDLE_VALUE;
+	HANDLE map_handle = NULL;
+    size_t size = 0;
+	char* data = NULL;
+
+    bool good() {
+		return (file_handle != INVALID_HANDLE_VALUE && map_handle != NULL && data != NULL);
+    }
+
+    FileMapper(const char* file_name) {
+        file_handle = CreateFileA(file_name, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+        if (file_handle == INVALID_HANDLE_VALUE) {
+            std::cerr << "Failed to open file: " << file_name << ". Error: " << GetLastError() << std::endl;
+
+            return;
+        }
+
+        LARGE_INTEGER file_size;
+
+        if (!::GetFileSizeEx(file_handle, &file_size)) {
+            std::cerr << "Failed to get file size. Error: " << GetLastError() << std::endl;
+
+            return;
+        }
+
+        size = static_cast<size_t>(file_size.QuadPart);
+
+        map_handle = CreateFileMappingA(file_handle, NULL, PAGE_READONLY, 0, 0, NULL);
+
+        if (!map_handle) {
+            std::cerr << "Failed to create file mapping. Error: " << GetLastError() << std::endl;
+
+            return;
+        }
+
+        data = static_cast<char*>(MapViewOfFile(map_handle, FILE_MAP_READ, 0, 0, size));
+
+        if (!data) {
+            std::cerr << "Failed to map view of file. Error: " << GetLastError() << std::endl;
+
+            return;
+        }
+    }
+
+    ~FileMapper() {
+        if (data != NULL) {
+            UnmapViewOfFile(data);
+        }
+
+        if (map_handle != NULL) {
+            CloseHandle(map_handle);
+        }
+
+        if (file_handle != INVALID_HANDLE_VALUE) {
+            CloseHandle(file_handle);
+        }
+    }
+};
+
+struct Clipboard {
+    bool good = false;
+
+    Clipboard() {
+        if (!(good = OpenClipboard(NULL))) {
+            std::cerr << "Failed to open clipboard. Error: " << GetLastError() << std::endl;
+        }
+    }
+
+    ~Clipboard() {
+        CloseClipboard();
+    }
+};
+
+int main(int argc, char** argv) {
     // Open the clipboard
-    if (!OpenClipboard(NULL)) {
-        std::cerr << "Failed to open clipboard. Error: " << GetLastError() << std::endl;
-        return 1;
+	Clipboard clipboard;
+
+	// Check if the clipboard was opened successfully
+	if (!clipboard.good) {
+		return 1;
+	}
+
+    char* file_name = NULL;
+
+	if (get_arg(argc, argv, "--png", &file_name)) {
+		FileMapper mapper(file_name);
+
+		if (!mapper.good()) {
+			return 1;
+		}
+
+		process_png(mapper.data, mapper.size);
+
+        return 0;
+	}
+	else if (get_arg(argc, argv, "--svg", &file_name)) {
+		FileMapper mapper(file_name);
+
+		if (!mapper.good()) {
+			return 1;
+		}
+
+		// Check if the file is a valid SVG
+		std::string_view data(mapper.data, mapper.size);
+
+		if (!data.starts_with("<?xml") && !data.starts_with("<svg")) {
+			std::cerr << "File is not a valid SVG." << std::endl;
+
+			return 1;
+		}
+
+		// Copy the SVG data to the clipboard
+		copy_URL(data, "image/svg+xml");
+
+        return 0;
     }
 
     //Register "PNG" format
@@ -286,9 +417,6 @@ int main() {
 	else {
 		std::cout << "Did not find SVG or PNG in clipboard." << std::endl;
 	}
-
-    // Close the clipboard
-    CloseClipboard();
 
     return 0;
 }
