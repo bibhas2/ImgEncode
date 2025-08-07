@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include "Main.h"
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -329,6 +330,61 @@ struct Clipboard {
     }
 };
 
+//A class that uses GetClipboardData, GetClipboardData, GlobalLock etc. to safely get clipboard data
+//for a format ID
+struct ClipboardData {
+	HANDLE hData = NULL;
+	char* data = NULL;
+	size_t size = 0;
+
+	bool get(UINT format) {
+        clear();
+
+		hData = GetClipboardData(format);
+
+		if (hData) {
+			data = static_cast<char*>(GlobalLock(hData));
+
+			if (data) {
+				size = GlobalSize(hData);
+
+                return true;
+			}
+			else {
+				std::cerr << "Failed to lock clipboard data. Error: " << GetLastError() << std::endl;
+			}
+		}
+
+        return false;
+	}
+
+	void clear() {
+		if (data) {
+			GlobalUnlock(hData);
+
+			data = NULL;
+		}
+
+		hData = NULL;
+		size = 0;
+	}
+
+	~ClipboardData() {
+        clear();
+	}
+};
+
+void process_svg(std::string_view& data)
+{
+    //Check if the data starts with the SVG header
+    if (data.starts_with("<?xml") || data.starts_with("<svg")) {
+        copy_URL(data, "image/svg+xml");
+    }
+    else {
+        std::cout << "Clipboard does not contain SVG data." << std::endl;
+    }
+}
+
 int main(int argc, char** argv) {
     // Open the clipboard
 	Clipboard clipboard;
@@ -358,17 +414,9 @@ int main(int argc, char** argv) {
 			return 1;
 		}
 
-		// Check if the file is a valid SVG
 		std::string_view data(mapper.data, mapper.size);
 
-		if (!data.starts_with("<?xml") && !data.starts_with("<svg")) {
-			std::cerr << "File is not a valid SVG." << std::endl;
-
-			return 1;
-		}
-
-		// Copy the SVG data to the clipboard
-		copy_URL(data, "image/svg+xml");
+		process_svg(data);
 
         return 0;
     }
@@ -377,46 +425,22 @@ int main(int argc, char** argv) {
 	UINT pngFormat = RegisterClipboardFormatA("PNG");
 
 	//Get the text data from the clipboard
-    HANDLE hData = NULL;
+    ClipboardData clip_data{};
 
-	if ((hData = GetClipboardData(CF_TEXT)) != NULL) {
-		char* pData = static_cast<char*>(GlobalLock(hData));
+	if (clip_data.get(CF_TEXT)) {
+        //CF_TEXT data is NULL terminated
+		std::string_view data(clip_data.data);
 
-		if (pData) {
-			std::string_view data(pData);
+        process_svg(data);
 
-			//Check if the data starts with the SVG header
-            if (data.starts_with("<?xml") || data.starts_with("<svg")) {
-                copy_URL(data, "image/svg+xml");
-			}
-			else {
-				std::cout << "Clipboard does not contain SVG data." << std::endl;
-			}
+        return 0;
+	} else if (clip_data.get(pngFormat)) {
+        process_png(clip_data.data, clip_data.size);
 
-			GlobalUnlock(hData);
-		}
-		else {
-			std::cerr << "Failed to lock clipboard data. Error: " << GetLastError() << std::endl;
-		}
-	}
-	else if ((hData = GetClipboardData(pngFormat)) != NULL) {
-        char* pData = static_cast<char*>(GlobalLock(hData));
+        return 0;
+    }
 
-        if (pData) {
-            //Get size of data
-            size_t size = GlobalSize(hData);
+	std::cout << "Did not find SVG or PNG in clipboard." << std::endl;
 
-            process_png(pData, size);
-
-            GlobalUnlock(hData);
-        }
-        else {
-            std::cerr << "Failed to lock clipboard data. Error: " << GetLastError() << std::endl;
-        }
-	}
-	else {
-		std::cout << "Did not find SVG or PNG in clipboard." << std::endl;
-	}
-
-    return 0;
+    return 1;
 }
