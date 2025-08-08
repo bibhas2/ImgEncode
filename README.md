@@ -11,7 +11,9 @@ ImgEncode
 
 This will create a img tag like this and copy it into the clipboard.
 
+```html
 <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEU..." alt="Embedded Image" />
+```
 
 Now you can paste it in a notebook cell.
 
